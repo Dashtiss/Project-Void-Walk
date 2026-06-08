@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "backrooms",
+  "version": "${version}",
+  "name": "backrooms",
+  "description": "",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "icon": "assets/backrooms/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "client": [
+      "io.github.dashtiss.backrooms.client.BackroomsClient"
+    ],
+    "main": [
+      "io.github.dashtiss.backrooms.Backrooms"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
