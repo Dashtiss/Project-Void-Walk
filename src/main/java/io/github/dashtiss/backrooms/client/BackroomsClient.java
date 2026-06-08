@@ -8,10 +8,13 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 import io.github.dashtiss.backrooms.VanishTogglePayload;
 
 public class BackroomsClient implements ClientModInitializer {
+
+    private static final KeyBinding.Category CATEGORY = KeyBinding.Category.create(Identifier.of("backrooms", "category"));
 
     @Override
     public void onInitializeClient() {
@@ -25,7 +28,7 @@ public class BackroomsClient implements ClientModInitializer {
                 "key.backrooms.vanish",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_V,
-                "category.backrooms.general"
+                CATEGORY
         ));
 
         // Listen for keypress and send toggle packet

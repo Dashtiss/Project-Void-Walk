@@ -52,7 +52,7 @@ public class Backrooms implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             for (UUID uuid : VANISHED_PLAYERS) {
                 for (ServerWorld world : server.getWorlds()) {
-                    ServerPlayerEntity player = world.getPlayerByUuid(uuid);
+                    ServerPlayerEntity player = (ServerPlayerEntity) world.getPlayerByUuid(uuid);
                     if (player != null) {
                         world.spawnParticles(ParticleTypes.SOUL_FIRE_FLAME, player.getX(), player.getY() + 1.0, player.getZ(), 1, 0.1, 0.1, 0.1, 0.01);
                     }
@@ -66,18 +66,18 @@ public class Backrooms implements ModInitializer {
     }
 
     public static boolean toggleVanish(ServerPlayerEntity player) {
-        MinecraftServer server = player.server;
+        MinecraftServer server = player.getEntityWorld().getServer();
         if (server == null) return false;
-        ServerWorld world = (ServerWorld) player.getWorld();
+        ServerWorld world = player.getEntityWorld();
         
         if (VANISHED_PLAYERS.contains(player.getUuid())) {
-            server.getPlayerManager().broadcast(new PlayerListS2CPacket(PlayerListS2CPacket.Action.ADD, player), false);
+            server.getPlayerManager().broadcast((Text) new PlayerListS2CPacket(PlayerListS2CPacket.Action.ADD_PLAYER, player), false);
             world.getChunkManager().loadEntity(player);
             VANISHED_PLAYERS.remove(player.getUuid());
             return false;
         } else {
             world.getChunkManager().unloadEntity(player);
-            server.getPlayerManager().broadcast(new PlayerListS2CPacket(PlayerListS2CPacket.Action.REMOVE, player), false);
+            server.getPlayerManager().broadcast((Text) new PlayerListS2CPacket(PlayerListS2CPacket.Action.REMOVE, player), false);
             VANISHED_PLAYERS.add(player.getUuid());
             return true;
         }
