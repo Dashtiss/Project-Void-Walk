@@ -1,20 +1,23 @@
 {
   "schemaVersion": 1,
-  "id": "backrooms",
+  "id": "project_void_walk",
   "version": "${version}",
-  "name": "backrooms",
+  "name": "Project Void Walk",
   "description": "",
   "authors": [],
   "contact": {},
   "license": "All-Rights-Reserved",
-  "icon": "assets/backrooms/icon.png",
+  "icon": "assets/voidwalk/icon.png",
   "environment": "*",
   "entrypoints": {
     "client": [
-      "io.github.dashtiss.backrooms.client.BackroomsClient"
+      "io.github.dashtiss.voidwalk.client.VoidWalkClient"
     ],
     "main": [
-      "io.github.dashtiss.backrooms.Backrooms"
+      "io.github.dashtiss.voidwalk.VoidWalk"
+    ],
+    "fabric-datagen": [
+      "io.github.dashtiss.voidwalk.datagen.VoidWalkDataGenerator"
     ]
   },
   "depends": {

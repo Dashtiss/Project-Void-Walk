@@ -1,6 +1,6 @@
-package io.github.dashtiss.backrooms.client;
+package io.github.dashtiss.voidwalk.client;
 
-import io.github.dashtiss.backrooms.HandshakePayload;
+import io.github.dashtiss.voidwalk.payloads.HandshakePayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -10,9 +10,9 @@ import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
-import io.github.dashtiss.backrooms.VanishTogglePayload;
+import io.github.dashtiss.voidwalk.payloads.VanishTogglePayload;
 
-public class BackroomsClient implements ClientModInitializer {
+public class VoidWalkClient implements ClientModInitializer {
 
     private static final KeyBinding.Category CATEGORY = KeyBinding.Category.create(Identifier.of("backrooms", "category"));
 
@@ -38,4 +38,6 @@ public class BackroomsClient implements ClientModInitializer {
             }
         });
     }
+
+
 }

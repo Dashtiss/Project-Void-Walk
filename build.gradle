@@ -29,6 +29,35 @@ dependencies {
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
     modRuntimeOnly("me.djtheredstoner:DevAuth-fabric:1.2.2")
 }
+sourceSets {
+    main {
+        resources {
+            srcDirs += [ 'src/main/generated' ]
+        }
+    }
+}
+
+// This achieving the exact same goal as the idea block but works natively!
+tasks.withType(ProcessResources).configureEach {
+    from('src/main/generated') {
+        include '**/*'
+    }
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
+
+// FORCE Loom to include the data-generated folders into the runtime client/server classpath
+loom {
+    mods {
+        "voidwalk" { // Replace with your exact mod ID if it's different
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+fabricApi {
+    configureDataGeneration()
+}
+
 
 processResources {
     inputs.property "version", project.version

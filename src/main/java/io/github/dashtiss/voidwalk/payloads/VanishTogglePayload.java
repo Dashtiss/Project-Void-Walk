@@ -1,4 +1,4 @@
-package io.github.dashtiss.backrooms;
+package io.github.dashtiss.voidwalk.payloads;
 
 import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
