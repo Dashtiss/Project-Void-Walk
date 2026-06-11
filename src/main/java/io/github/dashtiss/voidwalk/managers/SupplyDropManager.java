@@ -3,7 +3,7 @@ package io.github.dashtiss.voidwalk.managers;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.BarrelBlockEntity;
 import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.entity.ChestBlockEntity;
+import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.item.ItemStack;
@@ -18,6 +18,7 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.World;
 
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -131,22 +132,37 @@ public class SupplyDropManager {
 
     private static void executeLandingSequence(ServerWorld world, BlockPos pos) {
         // Place the physical chest down
-        world.setBlockState(pos, Blocks.CHEST.getDefaultState());
+        world.setBlockState(pos, Blocks.BARREL.getDefaultState());
         LOCKED_DROPS.add(new LockedDrop(pos));
         BlockEntity blockEntity = world.getBlockEntity(pos);
-        if (blockEntity instanceof ChestBlockEntity chest) {
+
+        if (blockEntity instanceof BarrelBlockEntity barrel) {
+
             RegistryKey<LootTable> lootTableKey = RegistryKey.of(
                     RegistryKeys.LOOT_TABLE,
                     Identifier.of("voidwalk", "chests/supply_drop")
             );
-            chest.setLootTable(lootTableKey, world.getRandom().nextLong());
-            chest.markDirty();
+
+            barrel.setLootTable(
+                    lootTableKey,
+                    world.getRandom().nextLong()
+            );
+
+            barrel.markDirty();
         }
+
 
         // Landing impacts explosions
         world.spawnParticles(ParticleTypes.EXPLOSION, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 1, 0, 0, 0, 0);
         world.spawnParticles(ParticleTypes.CAMPFIRE_SIGNAL_SMOKE, pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5, 25, 0.3, 0.8, 0.3, 0.03);
-
+        world.createExplosion(
+                null,
+                pos.getX(),
+                pos.getY(),
+                pos.getZ(),
+                1.5F,
+                World.ExplosionSourceType.NONE
+        );
         world.getServer().getPlayerManager().broadcast(
                 Text.literal("§c§l[!] §eThe Supply Drop has touched down safely at X: " + pos.getX() + " Z: " + pos.getZ() + "!"), false
         );

@@ -1,5 +1,6 @@
 package io.github.dashtiss.voidwalk;
 
+import com.mojang.logging.LogUtils;
 import io.github.dashtiss.voidwalk.commands.BountyCommand;
 import io.github.dashtiss.voidwalk.commands.VoidWalkCommand;
 import io.github.dashtiss.voidwalk.managers.BountyManager;
@@ -16,13 +17,12 @@ import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
+import net.minecraft.network.packet.s2c.play.PlayerRemoveS2CPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
-import net.minecraft.text.Text;
 import net.minecraft.sound.SoundEvents;
-import com.mojang.logging.LogUtils;
+import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
@@ -45,8 +45,7 @@ public class VoidWalk implements ModInitializer {
     private static final String DATA_FILE = "backrooms_bounty.txt";
     private static final Random RANDOM = new Random();
     private static int crateTimer = 0;
-    private static int nextCrateTime =
-            36000 + RANDOM.nextInt(36000);
+    private static int nextCrateTime = 36000 + RANDOM.nextInt(36000);
 
     @Override
     public void onInitialize() {
@@ -70,8 +69,7 @@ public class VoidWalk implements ModInitializer {
             }
             // will handle bounty deaths
             if (source.getAttacker() instanceof ServerPlayerEntity killer) {
-                if (entity.isPlayer())
-                    BountyManager.handlePlayerDeath((ServerPlayerEntity) entity, killer);
+                if (entity.isPlayer()) BountyManager.handlePlayerDeath((ServerPlayerEntity) entity, killer);
             }
         });
 
@@ -117,9 +115,7 @@ public class VoidWalk implements ModInitializer {
         });
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(server -> {
             SupplyDropManager.tickActiveDrops();
-            server.getWorlds().forEach(
-                    SupplyDropManager::tickLockedDrops
-            );
+            server.getWorlds().forEach(SupplyDropManager::tickLockedDrops);
 
             crateTimer++;
 
@@ -127,25 +123,18 @@ public class VoidWalk implements ModInitializer {
 
                 crateTimer = 0;
 
-                nextCrateTime =
-                        36000 + RANDOM.nextInt(36000);
+                nextCrateTime = 36000 + RANDOM.nextInt(36000);
 
-                SupplyDropManager.attemptRandomLootCrate(
-                        server.getOverworld()
-                );
+                SupplyDropManager.attemptRandomLootCrate(server.getOverworld());
             }
         });
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
 
-            if (world.isClient())
-                return ActionResult.PASS;
+            if (world.isClient()) return ActionResult.PASS;
 
             BlockPos pos = hitResult.getBlockPos();
 
-            if (SupplyDropManager.handleChestInteraction(
-                    (ServerPlayerEntity) player,
-                    pos
-            )) {
+            if (SupplyDropManager.handleChestInteraction((ServerPlayerEntity) player, pos)) {
                 return ActionResult.FAIL;
             }
 
@@ -156,36 +145,46 @@ public class VoidWalk implements ModInitializer {
     public static void toggleVanish(ServerPlayerEntity player) {
         UUID playerUuid = player.getUuid();
         MinecraftServer server = player.getEntityWorld().getServer();
-        ServerWorld world = (ServerWorld) player.getEntityWorld();
+
+        if (server == null) {
+            return;
+        }
 
         if (VANISHED_PLAYERS.contains(playerUuid)) {
-            // --- REAPPEAR LOGIC ---
+
+            // ==========================
+            // REAPPEAR
+            // ==========================
+
             VANISHED_PLAYERS.remove(playerUuid);
 
-            // 1. Tell everyone's client tracking system to reload your player profile
-            PlayerListS2CPacket addPacket = new PlayerListS2CPacket(
-                    EnumSet.of(PlayerListS2CPacket.Action.ADD_PLAYER),
-                    List.of(player)
-            );
-            server.getPlayerManager().sendToAll(addPacket);
+            player.setInvisible(false);
 
-            // 2. Force the server chunk manager to load and broadcast your physical avatar entity again
-            world.getChunkManager().loadEntity(player);
+            for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
+
+                if (other == player) continue;
+
+                other.networkHandler.sendPacket(new PlayerListS2CPacket(EnumSet.of(PlayerListS2CPacket.Action.ADD_PLAYER), List.of(player)));
+            }
 
             player.sendMessage(Text.literal("§aYou have reappeared."), true);
+
         } else {
-            // --- VANISH LOGIC ---
+
+            // ==========================
+            // VANISH
+            // ==========================
+
             VANISHED_PLAYERS.add(playerUuid);
 
-            // 1. Force the server chunk manager to stop sending your entity updates to other clients
-            world.getChunkManager().unloadEntity(player);
+            player.setInvisible(true);
 
-            // 2. FIXED: Pass the player list collection directly into the constructor!
-            PlayerListS2CPacket removePacket = new PlayerListS2CPacket(
-                    EnumSet.of(PlayerListS2CPacket.Action.UPDATE_LISTED),
-                    List.of(player)
-            );
-            server.getPlayerManager().sendToAll(removePacket);
+            for (ServerPlayerEntity other : server.getPlayerManager().getPlayerList()) {
+
+                if (other == player) continue;
+
+                other.networkHandler.sendPacket(new PlayerRemoveS2CPacket(List.of(player.getUuid())));
+            }
 
             player.sendMessage(Text.literal("§7You have slipped into the shadows..."), true);
         }
@@ -200,13 +199,8 @@ public class VoidWalk implements ModInitializer {
         Vec3d endPosition = eyePosition.add(lookVector.multiply(30.0)); // 30 blocks away
 
         // 2. Build the context setup
-        RaycastContext context = new RaycastContext(
-                eyePosition,
-                endPosition,
-                RaycastContext.ShapeType.OUTLINE,
-                RaycastContext.FluidHandling.NONE, // Ignores water/lava blocks
-                player
-        );
+        RaycastContext context = new RaycastContext(eyePosition, endPosition, RaycastContext.ShapeType.OUTLINE, RaycastContext.FluidHandling.NONE, // Ignores water/lava blocks
+                player);
 
         // 3. Execute the raycast
         BlockHitResult hitResult = world.raycast(context);
@@ -218,8 +212,7 @@ public class VoidWalk implements ModInitializer {
             // 5. Play the sound (Server-safe wrapper method)
             // This plays the sound at the block pos for everyone nearby, except the target player parameter if specified.
             // Passing 'null' as the first parameter ensures EVERYONE (including the casting player) hears it.
-            world.playSound(
-                    null,                             // Except player (null = play for everyone)
+            world.playSound(null,                             // Except player (null = play for everyone)
                     hitPos,                           // The block position coordinates
                     SoundEvents.BLOCK_GLASS_STEP,       // The SoundEvent asset identifier
                     SoundCategory.MASTER,             // Volume slider assignment group
@@ -235,7 +228,9 @@ public class VoidWalk implements ModInitializer {
             for (Map.Entry<UUID, Integer> entry : KILL_COUNTS.entrySet()) {
                 writer.println(entry.getKey() + ":" + entry.getValue());
             }
-        } catch (IOException e) { LOGGER.error("Failed to save bounty data", e); }
+        } catch (IOException e) {
+            LOGGER.error("Failed to save bounty data", e);
+        }
     }
 
     private static void loadBountyData() {
@@ -251,7 +246,9 @@ public class VoidWalk implements ModInitializer {
                     KILL_COUNTS.put(UUID.fromString(parts[0]), Integer.parseInt(parts[1]));
                 }
             }
-        } catch (Exception e) { LOGGER.error("Failed to load bounty data", e); }
+        } catch (Exception e) {
+            LOGGER.error("Failed to load bounty data", e);
+        }
     }
 
     public static boolean isClientModded(UUID uuid) {
