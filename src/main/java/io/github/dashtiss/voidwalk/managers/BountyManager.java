@@ -3,7 +3,6 @@ package io.github.dashtiss.voidwalk.managers;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
-import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.server.MinecraftServer;
@@ -135,7 +134,7 @@ public class BountyManager {
             // Save immediately when a bounty is wiped out
             saveBounties(killer.getEntityWorld().getServer());
 
-            victim.getEntityWorld().getServer().getPlayerManager().broadcast(
+            world.getServer().getPlayerManager().broadcast(
                     Text.literal("§4§l[BOUNTY CLAIMED] §c" + killer.getName().getString()
                             + " §ehas eliminated §4" + victim.getName().getString() + " §eand claimed §b"
                             + prizeAmount + " Diamonds!"), false
