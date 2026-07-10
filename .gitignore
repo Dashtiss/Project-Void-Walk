@@ -120,3 +120,4 @@ runs/
 
 .proxyai
 src/main/generated/.cache
+.cptr

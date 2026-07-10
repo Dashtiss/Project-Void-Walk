@@ -3,6 +3,7 @@ package io.github.dashtiss.voidwalk.managers;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
+import com.mojang.logging.LogUtils;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.server.MinecraftServer;
@@ -11,6 +12,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.WorldSavePath;
+import org.slf4j.Logger;
 
 import java.io.File;
 import java.io.FileReader;
@@ -25,6 +27,7 @@ import java.util.UUID;
 public class BountyManager {
 
     private static Map<UUID, Integer> ACTIVE_BOUNTIES = new HashMap<>();
+    private static final Logger LOGGER = LogUtils.getLogger();
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
     /**
@@ -47,10 +50,9 @@ public class BountyManager {
 
         try (FileWriter writer = new FileWriter(file)) {
             GSON.toJson(saveMap, writer);
-            System.out.println("[VoidWalk] Successfully saved " + saveMap.size() + " active bounties to disk.");
+            LOGGER.info("Successfully saved {} active bounties to disk.", saveMap.size());
         } catch (IOException e) {
-            System.err.println("[VoidWalk] Failed to save active bounties!");
-            e.printStackTrace();
+            LOGGER.error("Failed to save active bounties!", e);
         }
     }
 
@@ -59,7 +61,10 @@ public class BountyManager {
      */
     public static void loadBounties(MinecraftServer server) {
         File file = getSaveFile(server);
-        if (!file.exists()) return;
+        if (!file.exists()) {
+            LOGGER.info("No bounty save file found at {}. Starting fresh.", getSaveFile(server).getName());
+            return;
+        }
 
         try (FileReader reader = new FileReader(file)) {
             Type type = new TypeToken<Map<String, Integer>>(){}.getType();
@@ -69,10 +74,9 @@ public class BountyManager {
             if (loadMap != null) {
                 loadMap.forEach((uuidStr, amount) -> ACTIVE_BOUNTIES.put(UUID.fromString(uuidStr), amount));
             }
-            System.out.println("[VoidWalk] Loaded " + ACTIVE_BOUNTIES.size() + " active bounties from save file.");
+            LOGGER.info("Loaded {} active bounties from save file.", ACTIVE_BOUNTIES.size());
         } catch (IOException e) {
-            System.err.println("[VoidWalk] Failed to load active bounties!");
-            e.printStackTrace();
+            LOGGER.error("Failed to load active bounties!", e);
         }
     }
 
@@ -122,6 +126,7 @@ public class BountyManager {
                 Text.literal("§6§l[BOUNTY] §e" + sender.getName().getString() + " placed a bounty of §b"
                         + amount + " Diamonds §eon §c" + target.getName().getString() + "!"), false
         );
+        LOGGER.info("Bounty placed on {} by {} for {} diamonds", target.getName().getString(), sender.getName().getString(), amount);
     }
 
     public static void handlePlayerDeath(ServerPlayerEntity victim, ServerPlayerEntity killer) {
@@ -130,7 +135,7 @@ public class BountyManager {
         if (ACTIVE_BOUNTIES.containsKey(victimUUID)) {
 
             int prizeAmount = ACTIVE_BOUNTIES.remove(victimUUID);
-            // System.out.println("Prize amount = " + prizeAmount);
+            LOGGER.info("Bounty of {} diamonds claimed by {} for killing {}", prizeAmount, killer.getName().getString(), victim.getName().getString());
             // Save immediately when a bounty is wiped out
             saveBounties(killer.getEntityWorld().getServer());
 
@@ -143,7 +148,7 @@ public class BountyManager {
             int remaining = prizeAmount;
             while (remaining > 0) {
                 int stackSize = Math.min(remaining, 64);
-                // System.out.println("Spawning stack of " + stackSize);
+                LOGGER.debug("Spawning stack of {} diamonds", stackSize);
                 ItemStack rewardStack = new ItemStack(Items.DIAMOND, stackSize);
 
                 boolean inserted =

@@ -1,5 +1,6 @@
 package io.github.dashtiss.voidwalk.managers;
 
+import io.github.dashtiss.voidwalk.VoidWalk;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.BarrelBlockEntity;
 import net.minecraft.block.entity.BlockEntity;
@@ -71,7 +72,7 @@ public class SupplyDropManager {
         boolean spawned = world.spawnEntity(dropShip);
 
         // Debug logger to console
-        System.out.println("[VoidWalk] Spawning drop capsule at Y: " + spawnY + " | Success: " + spawned);
+        VoidWalk.LOGGER.info("Spawning drop capsule at Y: {} | Success: {}", spawnY, spawned);
 
         if (spawned) {
             ACTIVE_DROPS.add(new ActiveDrop(dropShip, targetPos, world));
@@ -90,6 +91,7 @@ public class SupplyDropManager {
             // Safety: if entity was cleared outside of our logic, dump it
             if (drop.shipEntity == null || !drop.shipEntity.isAlive()) {
                 ACTIVE_DROPS.remove(drop);
+                VoidWalk.LOGGER.debug("Removed inactive drop during tick");
                 continue;
             }
 
@@ -121,7 +123,7 @@ public class SupplyDropManager {
 
             // --- 3. LANDING DETECTION ---
             if (!(drop.world.getBlockState(new BlockPos(drop.shipEntity.getBlockX(), drop.shipEntity.getBlockY() - 1, drop.shipEntity.getBlockZ())).isAir())) {
-                System.out.println("[VoidWalk] Capsule reached target Y: " + drop.targetPos.getY() + ". Executing landing.");
+                VoidWalk.LOGGER.info("Capsule reached target Y: {}. Executing landing.", drop.targetPos.getY());
                 drop.shipEntity.discard();
                 executeLandingSequence(drop.world, new BlockPos(drop.shipEntity.getBlockX(), drop.shipEntity.getBlockY(), drop.shipEntity.getBlockZ()));
                 ACTIVE_DROPS.remove(drop);
@@ -162,6 +164,7 @@ public class SupplyDropManager {
                 1.5F,
                 World.ExplosionSourceType.NONE
         );
+        VoidWalk.LOGGER.info("Supply drop landed at X: {} Z: {}", pos.getX(), pos.getZ());
         world.getServer().getPlayerManager().broadcast(
                 Text.literal("§c§l[!] §eThe Supply Drop has touched down safely at X: " + pos.getX() + " Z: " + pos.getZ() + "!"), false
         );
@@ -293,8 +296,10 @@ public class SupplyDropManager {
 
         var players = world.getPlayers();
 
-        if (players.size() < 5)
+        if (players.size() < 5) {
+            VoidWalk.LOGGER.debug("Skipping loot cache spawn: only {} players online (need 5+)", players.size());
             return;
+        }
 
         double avgX = 0;
         double avgZ = 0;
@@ -336,6 +341,7 @@ public class SupplyDropManager {
                         targetZ
                 );
 
+        VoidWalk.LOGGER.info("Attempting to spawn loot cache at X:{} Z:{} (distance: {} blocks)", targetX, targetZ, Math.round(distance));
         spawnLootCrate(world, cratePos);
     }
     private static void spawnLootCrate(
@@ -382,6 +388,7 @@ public class SupplyDropManager {
                 0.03
         );
 
+        VoidWalk.LOGGER.info("Loot cache spawned at X: {} Z: {}", pos.getX(), pos.getZ());
         world.getServer()
                 .getPlayerManager()
                 .broadcast(

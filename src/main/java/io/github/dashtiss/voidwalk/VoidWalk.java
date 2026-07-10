@@ -1,8 +1,10 @@
 package io.github.dashtiss.voidwalk;
 
 import com.mojang.logging.LogUtils;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import io.github.dashtiss.voidwalk.commands.BountyCommand;
 import io.github.dashtiss.voidwalk.commands.VoidWalkCommand;
+import io.github.dashtiss.voidwalk.commands.StatsCommand;
 import io.github.dashtiss.voidwalk.managers.BountyManager;
 import io.github.dashtiss.voidwalk.managers.SupplyDropManager;
 import io.github.dashtiss.voidwalk.payloads.HandshakePayload;
@@ -15,10 +17,15 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.damage.DamageSource;
+import net.minecraft.entity.damage.DamageTypes;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerRemoveS2CPacket;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.command.CommandManager;
+import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
@@ -34,18 +41,27 @@ import org.slf4j.Logger;
 
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class VoidWalk implements ModInitializer {
 
     public static final Set<UUID> AUTHENTICATED_CLIENTS = new HashSet<>();
     public static final Set<UUID> VANISHED_PLAYERS = new HashSet<>();
     public static boolean BOUNTY_ENABLED = false;
-    public static final Map<UUID, Integer> KILL_COUNTS = new HashMap<>();
-    private static final Logger LOGGER = LogUtils.getLogger();
-    private static final String DATA_FILE = "backrooms_bounty.txt";
+    public static final Map<UUID, Integer> KILL_COUNTS = Collections.synchronizedMap(new HashMap<>());
+    public static final Map<UUID, Integer> DEATH_COUNTS = Collections.synchronizedMap(new HashMap<>());
+    public static final Logger LOGGER = LogUtils.getLogger();
+    private static final String DATA_FILE = "voidwalk_data.json";
     private static final Random RANDOM = new Random();
     private static int crateTimer = 0;
     private static int nextCrateTime = 36000 + RANDOM.nextInt(36000);
+
+    // Cooldown tracking for drop commands
+    public static final Map<UUID, Long> DROP_COOLDOWNS = new ConcurrentHashMap<>();
+    public static final long DROP_COOLDOWN_TICKS = 12000; // 10 minutes
+
+    // Bounty token item registration placeholder (not implemented yet)
 
     @Override
     public void onInitialize() {
@@ -60,16 +76,35 @@ public class VoidWalk implements ModInitializer {
         // 2. HOOK: Fires right during the midnight shutdown process before chunks unload
         ServerLifecycleEvents.SERVER_STOPPING.register(BountyManager::saveBounties);
 
-        ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
-            if (BOUNTY_ENABLED && source.getAttacker() instanceof ServerPlayerEntity attacker) {
-                if (entity instanceof ServerPlayerEntity) {
-                    KILL_COUNTS.put(attacker.getUuid(), KILL_COUNTS.getOrDefault(attacker.getUuid(), 0) + 1);
-                    attacker.sendMessage(Text.literal("§6[Bounty] §fKill recorded! Your total: " + KILL_COUNTS.get(attacker.getUuid())), false);
+        ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
+            // Handle kill counts for player kills
+            if (entity instanceof ServerPlayerEntity victim) {
+                ServerPlayerEntity killer = null;
+                
+                // Get the killer - handle both direct attacks and indirect damage
+                if (damageSource.getAttacker() instanceof ServerPlayerEntity attacker) {
+                    killer = attacker;
+                } else if (damageSource.getAttacker() instanceof ServerPlayerEntity attacker) {
+                    killer = attacker;
                 }
-            }
-            // will handle bounty deaths
-            if (source.getAttacker() instanceof ServerPlayerEntity killer) {
-                if (entity.isPlayer()) BountyManager.handlePlayerDeath((ServerPlayerEntity) entity, killer);
+                
+                // Record kills for the killer
+                if (killer != null) {
+                    if (BOUNTY_ENABLED) {
+                        KILL_COUNTS.put(killer.getUuid(), KILL_COUNTS.getOrDefault(killer.getUuid(), 0) + 1);
+                        killer.sendMessage(Text.literal("§6[Bounty] §fKill recorded! Your total: " + KILL_COUNTS.get(killer.getUuid())), false);
+                    }
+                    // Handle bounty rewards
+                    BountyManager.handlePlayerDeath(victim, killer);
+                    // Broadcast custom death message
+                    broadcastDeathMessage(victim, killer, damageSource);
+                } else {
+                    // Player died to non-player source (mob, environmental, etc.)
+                    broadcastDeathMessage(victim, null, damageSource);
+                }
+                
+                // Record death for the victim
+                DEATH_COUNTS.put(victim.getUuid(), DEATH_COUNTS.getOrDefault(victim.getUuid(), 0) + 1);
             }
         });
 
@@ -112,6 +147,7 @@ public class VoidWalk implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             VoidWalkCommand.register(dispatcher, registryAccess);
             BountyCommand.register(dispatcher);
+            StatsCommand.register(dispatcher, registryAccess);
         });
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(server -> {
             SupplyDropManager.tickActiveDrops();
@@ -147,6 +183,7 @@ public class VoidWalk implements ModInitializer {
         MinecraftServer server = player.getEntityWorld().getServer();
 
         if (server == null) {
+            LOGGER.warn("Failed to toggle vanish - no server available for player {}", player.getUuid());
             return;
         }
 
@@ -188,6 +225,7 @@ public class VoidWalk implements ModInitializer {
 
             player.sendMessage(Text.literal("§7You have slipped into the shadows..."), true);
         }
+        LOGGER.info("Player {} toggled vanish state", player.getName().getString());
     }
 
     public static void hallucination(PlayerEntity player) {
@@ -226,32 +264,171 @@ public class VoidWalk implements ModInitializer {
         try (PrintWriter writer = new PrintWriter(new FileWriter(DATA_FILE))) {
             writer.println("BOUNTY_ENABLED:" + BOUNTY_ENABLED);
             for (Map.Entry<UUID, Integer> entry : KILL_COUNTS.entrySet()) {
-                writer.println(entry.getKey() + ":" + entry.getValue());
+                writer.println("KILL:" + entry.getKey() + ":" + entry.getValue());
             }
+            for (Map.Entry<UUID, Integer> entry : DEATH_COUNTS.entrySet()) {
+                writer.println("DEATH:" + entry.getKey() + ":" + entry.getValue());
+            }
+            LOGGER.info("Bounty data saved: {} kill records, {} death records", KILL_COUNTS.size(), DEATH_COUNTS.size());
         } catch (IOException e) {
-            LOGGER.error("Failed to save bounty data", e);
+            LOGGER.error("Failed to save bounty data to {}", DATA_FILE, e);
         }
     }
 
     private static void loadBountyData() {
         File file = new File(DATA_FILE);
-        if (!file.exists()) return;
+        if (!file.exists()) {
+            LOGGER.info("No existing bounty data found at {}. Starting fresh.", DATA_FILE);
+            return;
+        }
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (line.startsWith("BOUNTY_ENABLED:")) {
                     BOUNTY_ENABLED = Boolean.parseBoolean(line.split(":")[1]);
-                } else if (line.contains(":")) {
+                } else if (line.startsWith("KILL:") && line.split(":").length >= 3) {
                     String[] parts = line.split(":");
-                    KILL_COUNTS.put(UUID.fromString(parts[0]), Integer.parseInt(parts[1]));
+                    KILL_COUNTS.put(UUID.fromString(parts[1]), Integer.parseInt(parts[2]));
+                } else if (line.startsWith("DEATH:") && line.split(":").length >= 3) {
+                    String[] parts = line.split(":");
+                    DEATH_COUNTS.put(UUID.fromString(parts[1]), Integer.parseInt(parts[2]));
                 }
             }
+            LOGGER.info("Loaded {} kill records and {} death records from bounty data", KILL_COUNTS.size(), DEATH_COUNTS.size());
         } catch (Exception e) {
-            LOGGER.error("Failed to load bounty data", e);
+            LOGGER.error("Failed to load bounty data from {}", DATA_FILE, e);
         }
     }
 
     public static boolean isClientModded(UUID uuid) {
         return AUTHENTICATED_CLIENTS.contains(uuid);
+    }
+
+    /**
+     * Broadcasts custom purge-themed death messages
+     */
+    public static void broadcastDeathMessage(ServerPlayerEntity victim, ServerPlayerEntity killer, DamageSource damageSource) {
+        MinecraftServer server = victim.getEntityWorld().getServer();
+        if (server == null) return;
+
+        String victimName = victim.getName().getString();
+        Text deathMessage;
+
+        if (killer != null) {
+            String killerName = killer.getName().getString();
+            // Player killed by player - The Purge style
+            deathMessage = Text.literal("§4☠ §c" + victimName + " §7was §4PURGED §7by §c" + killerName + "§7!");
+        } else {
+            // Player died to non-player source (mob, environmental, etc.)
+            Entity trueSource = damageSource.getAttacker();
+            String cause = getDeathCause(damageSource, trueSource);
+            
+            if (cause != null) {
+                deathMessage = Text.literal("§4☠ §c" + victimName + " §7was §celiminated §7by " + cause + "§7!");
+            } else if (damageSource.isOf(DamageTypes.OUT_OF_WORLD)) {
+                deathMessage = Text.literal("§4☠ §c" + victimName + " §7§operished in the void§7...");
+            } else if (damageSource.isOf(net.minecraft.entity.damage.DamageTypes.GENERIC)) {
+                deathMessage = Text.literal("§4☠ §c" + victimName + " §7§operished in the void§7...");
+            } else {
+                deathMessage = Text.literal("§4☠ §c" + victimName + " §7§ldied§7!");
+            }
+        }
+
+        server.getPlayerManager().broadcast(deathMessage, false);
+        LOGGER.debug("Death message broadcasted for {}", victimName);
+    }
+
+    /**
+     * Gets a formatted death cause string for non-player deaths
+     */
+    private static String getDeathCause(DamageSource damageSource, Entity trueSource) {
+        if (trueSource != null) {
+            // Mob or entity killed player - capitalize first letter
+            String entityName = trueSource.getName().getString();
+            if (!entityName.isEmpty()) {
+                entityName = entityName.substring(0, 1).toUpperCase() + entityName.substring(1);
+            }
+            return "§e" + entityName;
+        }
+
+        // Handle specific damage types
+        if (damageSource.isOf(net.minecraft.entity.damage.DamageTypes.DROWN)) {
+            return "§bDrowned§7";
+        } else if (damageSource.isOf(net.minecraft.entity.damage.DamageTypes.FALL)) {
+            return "§7fall damage§7";
+        } else if (damageSource.isOf(net.minecraft.entity.damage.DamageTypes.ON_FIRE)) {
+            return "§6flames§7";
+        } else if (damageSource.isOf(net.minecraft.entity.damage.DamageTypes.CACTUS)) {
+            return "§aa cactus§7";
+        } else if (damageSource.isOf(net.minecraft.entity.damage.DamageTypes.LIGHTNING_BOLT)) {
+            return "§b§lLIGHTNING§7";
+        } else if (damageSource.isOf(net.minecraft.entity.damage.DamageTypes.STARVE)) {
+            return "§5starvation§7";
+        } else if (damageSource.isOf(net.minecraft.entity.damage.DamageTypes.WITHER)) {
+            return "§dWither§7";
+        } else if (damageSource.isOf(net.minecraft.entity.damage.DamageTypes.MAGIC)) {
+            return "§dmagic§7";
+        } else if (damageSource.isOf(net.minecraft.entity.damage.DamageTypes.EXPLOSION)) {
+            return "§ean explosion§7";
+        } else if (damageSource.isOf(net.minecraft.entity.damage.DamageTypes.ARROW)) {
+            return "§ean arrow§7";
+        } else if (damageSource.isOf(net.minecraft.entity.damage.DamageTypes.MOB_PROJECTILE)) {
+            return "§ea projectile§7";
+        }
+
+        return null;
+    }
+
+    /**
+     * Get formatted kill source for death messages
+     */
+    public static String getKillSourceDescription(DamageSource damageSource) {
+        Entity attacker = damageSource.getAttacker();
+        if (attacker != null) {
+            String name = attacker.getName().getString();
+            if (!name.isEmpty()) {
+                name = name.substring(0, 1).toUpperCase() + name.substring(1);
+            }
+            return name;
+        }
+        
+        if (damageSource.isOf(DamageTypes.DROWN)) return "Drowned";
+        if (damageSource.isOf(DamageTypes.FALL)) return "Fall Damage";
+        if (damageSource.isOf(DamageTypes.ON_FIRE)) return "Fire";
+        if (damageSource.isOf(DamageTypes.CACTUS)) return "Cactus";
+        if (damageSource.isOf(DamageTypes.LIGHTNING_BOLT)) return "Lightning";
+        if (damageSource.isOf(DamageTypes.STARVE)) return "Starvation";
+        if (damageSource.isOf(DamageTypes.WITHER)) return "Wither";
+        if (damageSource.isOf(DamageTypes.MAGIC)) return "Magic";
+        if (damageSource.isOf(DamageTypes.EXPLOSION)) return "Explosion";
+        if (damageSource.isOf(DamageTypes.OUT_OF_WORLD)) return "The Void";
+        
+        return "Unknown";
+    }
+
+    /**
+     * Get kill stats for a player
+     */
+    public static PlayerStats getPlayerStats(UUID uuid) {
+        int kills = KILL_COUNTS.getOrDefault(uuid, 0);
+        int deaths = DEATH_COUNTS.getOrDefault(uuid, 0);
+        double kdr = deaths > 0 ? (double) kills / deaths : kills;
+        int bountyClaims = BountyManager.getActiveBounties().getOrDefault(uuid, 0);
+        
+        return new PlayerStats(kills, deaths, kdr, bountyClaims);
+    }
+
+    public static class PlayerStats {
+        public final int kills;
+        public final int deaths;
+        public final double kdr;
+        public final int currentBounty;
+
+        public PlayerStats(int kills, int deaths, double kdr, int currentBounty) {
+            this.kills = kills;
+            this.deaths = deaths;
+            this.kdr = kdr;
+            this.currentBounty = currentBounty;
+        }
     }
 }
